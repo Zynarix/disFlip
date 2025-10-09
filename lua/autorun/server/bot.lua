@@ -46,14 +46,14 @@ function dsBot:SendMsg(channel, msg, embed)
 end
 
 function dsBot:FormatEmbed(title, desc, color, footer)
-    return disFlip.formatEmbed(self.p__token, title, desc, color, footer)
+    return disFlip.formatEmbed(title, desc, color, footer)
 end
 
-function dsBot:CreateChannel(name, category, access)
-    disFlip.CreateChannel(self.p__token, self.guild, name, category, access)
+function dsBot:createChannel(name, category, access)
+    disFlip.createChannel(self.p__token, self.guild, name, category, access)
 end
 
-function dsBot:DeleteChannel(channel)
+function dsBot:deleteChannel(channel)
     disFlip.deleteChannel(self.p__token, channel)
 end
 
@@ -67,6 +67,14 @@ end
 
 function dsBot:GetGuildMembers(callback)
     disFlip.getGuildMembers(self.p__token, self.guild, callback)
+end
+
+function dsBot:initWss(intents)
+    self.con = disFlip.startGateway(self.p__token,intents)
+end
+
+function dsBot:AddHook(name,callback)
+    self.con[name] = callback
 end
 
 setmetatable(dsBot, dsBot_mt)

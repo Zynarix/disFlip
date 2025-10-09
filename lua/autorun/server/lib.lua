@@ -1,11 +1,16 @@
 require("reqwest")
---require("gwsockets")
+require("gwsockets")
 
-local userAgent = "DisFlip (By Zynarix, 1.0)"
+local userAgent = "DisFlip (https://github.com/Zynarix/disFlip/, 1.0)"
 local api = "https://discord.com/api/v10"
+local wss = "wss://gateway.discord.gg/?v=10&encoding=json"
 
 if not reqwest then
     return print("reqwest.dll not found")
+end
+
+if not GWSockets then
+    return print("gwsockets.dll not found")
 end
 
 local disFlip = {}
@@ -78,7 +83,7 @@ function disFlip.formatEmbed(title, desc, color, footer)
 end
 
 -- Create channel
-function disFlip.CreateChannel(token, guild, name, category, access)
+function disFlip.createChannel(token, guild, name, category, access)
     request(token, {
         method = "POST",
         url = api .. "/guilds/" .. guild .. "/channels",
@@ -203,5 +208,155 @@ function disFlip.getGuildMembers(token, guild, callback)
         end
     })
 end
+
+-- Gateways and etc.
+
+local op = {
+    dispatch = 0,
+    heartbeat = 1,
+    identify = 2,
+    presenceUpdate = 3,
+    voiceUpdate = 4,
+    resume = 6,
+    reconnect = 7,
+    requestGuildMembers = 8,
+    invalidSession = 9,
+    hello = 10,
+    heartbeatAck = 11,
+    unkerr = 4000,
+    unknownOp = 4001,
+    decodeErr = 4002,
+    notAuthenticated = 4003,
+    authFailed = 4004,
+    alreadyAuthenticated = 4005,
+    invalidSeq = 4007,
+    rateLimited = 4008,
+    sessionTimedOut = 4009,
+    invalidShard = 4010,
+    shardingRequired = 4011,
+    invalidAPIVersion = 4012,
+    invalidIntents = 4013,
+    disallowedIntents = 4014
+}
+
+local intents = {
+    GUILDS = 2^0,
+    GUILD_MEMBERS = 2^1,
+    GUILD_MODERATION = 2^2,
+    GUILD_EXPRESSIONS = 2^3,
+    GUILD_INTEGRATIONS = 2^4,
+    GUILD_WEBHOOKS = 2^5,
+    GUILD_INVITES = 2^6,
+    GUILD_VOICE_STATES = 2^7,
+    GUILD_PRESENCES = 2^8,
+    GUILD_MESSAGES = 2^9,
+    GUILD_MESSAGE_REACTIONS = 2^10,
+    GUILD_MESSAGE_TYPING = 2^11,
+    DIRECT_MESSAGES = 2^12,
+    DIRECT_MESSAGE_REACTIONS = 2^13,
+    DIRECT_MESSAGE_TYPING = 2^14,
+    MESSAGE_CONTENT = 2^15,
+    GUILD_SCHEDULED_EVENTS = 2^16,
+    AUTO_MODERATION_CONFIGURATION = 2^20,
+    AUTO_MODERATION_EXECUTION = 2^21,
+    GUILD_MESSAGE_POLLS = 2^24,
+    DIRECT_MESSAGE_POLLS = 2^25,
+    ALL = 56052435
+}
+
+function disFlip.formGatewayMsg(op, data)
+    if not data then
+        return util.TableToJSON({ op = op })
+    end
+    return util.TableToJSON({ op = op, d = data })
+end
+
+function disFlip.startGateway(token, ints)
+    local con = GWSockets.createWebSocket(wss)
+    con.hbint = 0
+    con.sid = nil
+    con.resu = ""
+    con.seq = 0
+    con.callback = {}
+
+    con:setHeader("User-Agent", userAgent)
+
+    function con:onConnected()
+        print("[DisFlip] Connected to Discord Gateway")
+    end
+
+    function con:onDisconnected(errCode, errStr)
+        print("[DisFlip] Disconnected: " .. tostring(errCode) .. " (" .. tostring(errStr) .. ")")
+        timer.Remove("DisFlipHB_" .. (self.sid or "nil"))
+    end
+
+    function con:onMessage(msg)
+        local data = util.JSONToTable(msg)
+        if not data or not data.op then return end
+
+        local opc = tonumber(data.op)
+        local t = data.d
+
+        if opc == op.hello then
+            if not t or not t.heartbeat_interval then return end
+            self.hbint = t.heartbeat_interval / 1000
+
+            timer.Simple(self.hbint * math.Rand(0.1, 0.8), function()
+                if not self:IsValid() then return end
+
+                self:write(disFlip.formGatewayMsg(op.heartbeat, { s = nil }))
+                timer.Simple(0.05, function()
+                    if not self:IsValid() then return end
+
+                    self:write(disFlip.formGatewayMsg(op.identify, {
+                        token = token,
+                        properties = {
+                            os = system.IsWindows() and "windows" or "linux",
+                            browser = "DisFlip",
+                            device = "DisFlip",
+                        },
+                        large_threshold = 250,
+                        intents = ints or intents.ALL
+                    }))
+                end)
+
+                local tid = "DisFlipHB_" .. string.sub(token, 1, 8)
+                timer.Create(tid, self.hbint, 0, function()
+                    if not self:IsValid() then timer.Remove(tid) return end
+                    self:write(disFlip.formGatewayMsg(op.heartbeat, { s = self.seq }))
+                end)
+            end)
+
+        elseif opc == op.heartbeat then
+            self:write(disFlip.formGatewayMsg(op.heartbeat, { s = self.seq }))
+
+        elseif opc == op.dispatch then
+            self.seq = data.s
+            self.sid = (t and t.session_id) or self.sid
+            self.resu = (t and t.resume_gateway_url) or self.resu
+
+            if data.t and self.callback[data.t] then
+                self.callback[data.t](t)
+            end
+
+        elseif opc == op.invalidSession then
+            self:close()
+            error("[DisFlip] Invalid session")
+
+        elseif opc == op.invalidIntents then
+            self:close()
+            error("[DisFlip] Invalid intents. Check https://discord.com/developers/docs/topics/gateway#gateway-intents")
+
+        elseif opc == op.sessionTimedOut then
+            print("[DisFlip] Session timed out. Reconnecting...")
+            self:close()
+            disFlip.startGateway(token, ints)
+        end
+    end
+
+    con:connect()
+    return con
+end
+
 
 _G.disFlip = disFlip
