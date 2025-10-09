@@ -211,7 +211,7 @@ end
 
 -- Gateways and etc.
 
-local op = {
+disFlip.op = {
     dispatch = 0,
     heartbeat = 1,
     identify = 2,
@@ -239,7 +239,7 @@ local op = {
     disallowedIntents = 4014
 }
 
-local intents = {
+disFlip.intents = {
     GUILDS = 2^0,
     GUILD_MEMBERS = 2^1,
     GUILD_MODERATION = 2^2,
